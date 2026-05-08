@@ -75,9 +75,19 @@ const techStack = [
   'WebSocket',
 ]
 
-function useReveal() {
+/**
+ * Подключает IntersectionObserver к [data-reveal].
+ * deps пересобирают наблюдателя, когда в DOM появляются новые узлы
+ * (карточки проектов, чипы категорий и т.п.) — иначе они застревают на opacity: 0.
+ */
+function useReveal(deps = []) {
   useEffect(() => {
-    const els = document.querySelectorAll('[data-reveal]')
+    const els = Array.from(document.querySelectorAll('[data-reveal]'))
+    if (els.length === 0) return undefined
+    if (typeof IntersectionObserver === 'undefined') {
+      els.forEach((el) => el.classList.add('reveal-in'))
+      return undefined
+    }
     const io = new IntersectionObserver(
       (entries) => {
         entries.forEach((entry) => {
@@ -89,9 +99,13 @@ function useReveal() {
       },
       { threshold: 0.12 },
     )
-    els.forEach((el) => io.observe(el))
+    els.forEach((el) => {
+      if (el.classList.contains('reveal-in')) return
+      io.observe(el)
+    })
     return () => io.disconnect()
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps)
 }
 
 function useParallax(deps = []) {
@@ -134,7 +148,7 @@ function Home() {
   const [error, setError] = useState('')
   const projectsRef = useRef(null)
 
-  useReveal()
+  useReveal([projects.length, categories.length, loading])
   useParallax([projects.length])
 
   useEffect(() => {
