@@ -146,17 +146,57 @@ app.delete('/api/categories/:id', requireAuth, (req, res) => {
   res.json({ ok: true })
 })
 
+const fileToImagePath = (file) => `/uploads/${file.filename}`
+const removeUploadByUrl = (url) => {
+  if (!url) return
+  const filename = url.replace(/^\/uploads\//, '').split('/').pop()
+  if (!filename) return
+  const file = path.join(UPLOADS_DIR, filename)
+  if (fs.existsSync(file)) {
+    try {
+      fs.unlinkSync(file)
+    } catch (e) {
+      console.warn('Не удалось удалить файл:', file, e.message)
+    }
+  }
+}
+
+const normalizeProject = (project) => {
+  const images = Array.isArray(project.images) ? project.images.filter(Boolean) : []
+  if (images.length === 0 && project.image) images.push(project.image)
+  const cover = images[0] || null
+  return { ...project, images, image: cover }
+}
+
+const projectImages = upload.fields([
+  { name: 'images', maxCount: 12 },
+  { name: 'image', maxCount: 1 },
+])
+
+const collectFiles = (req) => {
+  if (!req.files) return []
+  const all = []
+  if (Array.isArray(req.files)) all.push(...req.files)
+  else {
+    if (req.files.images) all.push(...req.files.images)
+    if (req.files.image) all.push(...req.files.image)
+  }
+  return all
+}
+
 app.get('/api/projects', (_req, res) => {
   const db = readDB()
-  res.json(db.projects)
+  res.json(db.projects.map(normalizeProject))
 })
 
-app.post('/api/projects', requireAuth, upload.single('image'), (req, res) => {
+app.post('/api/projects', requireAuth, projectImages, (req, res) => {
   const { title, description, technologies, categoryId, link } = req.body || {}
   if (!title || !description) {
     return res.status(400).json({ error: 'Название и описание обязательны' })
   }
   const db = readDB()
+  const files = collectFiles(req)
+  const images = files.map(fileToImagePath)
   const project = {
     id: nanoid(10),
     title: String(title).trim(),
@@ -164,20 +204,54 @@ app.post('/api/projects', requireAuth, upload.single('image'), (req, res) => {
     technologies: String(technologies || '').trim(),
     categoryId: categoryId && db.categories.some((c) => c.id === categoryId) ? categoryId : null,
     link: (link || '').trim() || null,
-    image: req.file ? `/uploads/${req.file.filename}` : null,
+    images,
+    image: images[0] || null,
     createdAt: new Date().toISOString(),
   }
   db.projects.unshift(project)
   writeDB(db)
-  res.status(201).json(project)
+  res.status(201).json(normalizeProject(project))
 })
 
-app.put('/api/projects/:id', requireAuth, upload.single('image'), (req, res) => {
+app.put('/api/projects/:id', requireAuth, projectImages, (req, res) => {
   const db = readDB()
   const idx = db.projects.findIndex((p) => p.id === req.params.id)
   if (idx === -1) return res.status(404).json({ error: 'Проект не найден' })
-  const current = db.projects[idx]
-  const { title, description, technologies, categoryId, link, removeImage } = req.body || {}
+  const current = normalizeProject(db.projects[idx])
+  const {
+    title,
+    description,
+    technologies,
+    categoryId,
+    link,
+    removeImage,
+    keepImages,
+  } = req.body || {}
+
+  let keep = current.images
+  if (keepImages !== undefined) {
+    try {
+      const parsed = typeof keepImages === 'string' ? JSON.parse(keepImages) : keepImages
+      if (Array.isArray(parsed)) {
+        keep = parsed.filter((u) => current.images.includes(u))
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const removed = current.images.filter((u) => !keep.includes(u))
+  removed.forEach(removeUploadByUrl)
+
+  const newFiles = collectFiles(req)
+  const added = newFiles.map(fileToImagePath)
+
+  let images = [...keep, ...added]
+  if (removeImage === 'true' || removeImage === true) {
+    images.forEach(removeUploadByUrl)
+    images = []
+  }
+
   const updated = {
     ...current,
     title: title !== undefined ? String(title).trim() : current.title,
@@ -191,33 +265,20 @@ app.put('/api/projects/:id', requireAuth, upload.single('image'), (req, res) => 
           : null
         : current.categoryId,
     link: link !== undefined ? (String(link).trim() || null) : current.link,
-  }
-  if (req.file) {
-    if (current.image) {
-      const old = path.join(__dirname, current.image.replace(/^\//, ''))
-      if (fs.existsSync(old)) fs.unlinkSync(old)
-    }
-    updated.image = `/uploads/${req.file.filename}`
-  } else if (removeImage === 'true' || removeImage === true) {
-    if (current.image) {
-      const old = path.join(__dirname, current.image.replace(/^\//, ''))
-      if (fs.existsSync(old)) fs.unlinkSync(old)
-    }
-    updated.image = null
+    images,
+    image: images[0] || null,
   }
   db.projects[idx] = updated
   writeDB(db)
-  res.json(updated)
+  res.json(normalizeProject(updated))
 })
 
 app.delete('/api/projects/:id', requireAuth, (req, res) => {
   const db = readDB()
   const project = db.projects.find((p) => p.id === req.params.id)
   if (!project) return res.status(404).json({ error: 'Проект не найден' })
-  if (project.image) {
-    const file = path.join(__dirname, project.image.replace(/^\//, ''))
-    if (fs.existsSync(file)) fs.unlinkSync(file)
-  }
+  const all = normalizeProject(project).images
+  all.forEach(removeUploadByUrl)
   db.projects = db.projects.filter((p) => p.id !== req.params.id)
   writeDB(db)
   res.json({ ok: true })

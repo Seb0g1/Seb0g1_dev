@@ -9,9 +9,20 @@ const emptyForm = {
   technologies: '',
   categoryId: '',
   link: '',
-  image: null,
-  removeImage: false,
 }
+
+let previewCounter = 0
+const makePreviewItem = (file) =>
+  new Promise((resolve) => {
+    const reader = new FileReader()
+    reader.onload = () =>
+      resolve({
+        id: `new-${Date.now()}-${++previewCounter}`,
+        file,
+        preview: reader.result,
+      })
+    reader.readAsDataURL(file)
+  })
 
 function Admin() {
   const [authed, setAuthed] = useState(Boolean(getToken()))
@@ -23,14 +34,15 @@ function Admin() {
   const [categories, setCategories] = useState([])
   const [form, setForm] = useState(emptyForm)
   const [editingId, setEditingId] = useState(null)
-  const [imagePreview, setImagePreview] = useState(null)
-  const [keepImageUrl, setKeepImageUrl] = useState(null)
+  const [newImages, setNewImages] = useState([])
+  const [keepImages, setKeepImages] = useState([])
   const [newCategory, setNewCategory] = useState('')
   const [editingCategoryId, setEditingCategoryId] = useState(null)
   const [editingCategoryName, setEditingCategoryName] = useState('')
   const [busy, setBusy] = useState(false)
   const [toast, setToast] = useState(null)
   const dropRef = useRef(null)
+  const fileInputRef = useRef(null)
 
   useEffect(() => {
     if (!toast) return
@@ -68,21 +80,26 @@ function Admin() {
   const handleLogout = async () => {
     try {
       await api.logout()
-    } catch {}
+    } catch {
+      /* noop */
+    }
     clearToken()
     setAuthed(false)
   }
 
-  const setImage = (file) => {
-    if (!file) {
-      setImagePreview(null)
-      setForm((f) => ({ ...f, image: null }))
-      return
-    }
-    setForm((f) => ({ ...f, image: file, removeImage: false }))
-    const reader = new FileReader()
-    reader.onload = () => setImagePreview(reader.result)
-    reader.readAsDataURL(file)
+  const addFiles = async (files) => {
+    const list = Array.from(files || []).filter((f) => f.type.startsWith('image/'))
+    if (!list.length) return
+    const items = await Promise.all(list.map(makePreviewItem))
+    setNewImages((prev) => [...prev, ...items])
+  }
+
+  const removeNewImage = (id) => {
+    setNewImages((prev) => prev.filter((it) => it.id !== id))
+  }
+
+  const removeKeepImage = (url) => {
+    setKeepImages((prev) => prev.filter((u) => u !== url))
   }
 
   const onDragOver = (e) => {
@@ -93,15 +110,14 @@ function Admin() {
   const onDrop = (e) => {
     e.preventDefault()
     dropRef.current?.classList.remove('over')
-    const file = e.dataTransfer.files?.[0]
-    if (file) setImage(file)
+    addFiles(e.dataTransfer.files)
   }
 
   const resetForm = () => {
     setForm(emptyForm)
     setEditingId(null)
-    setImagePreview(null)
-    setKeepImageUrl(null)
+    setNewImages([])
+    setKeepImages([])
   }
 
   const submitProject = async (e) => {
@@ -114,8 +130,10 @@ function Admin() {
       data.append('technologies', form.technologies)
       data.append('categoryId', form.categoryId || '')
       data.append('link', form.link)
-      if (form.image instanceof File) data.append('image', form.image)
-      if (editingId && form.removeImage) data.append('removeImage', 'true')
+      newImages.forEach((it) => data.append('images', it.file))
+      if (editingId) {
+        data.append('keepImages', JSON.stringify(keepImages))
+      }
 
       if (editingId) {
         await api.updateProject(editingId, data)
@@ -142,11 +160,9 @@ function Admin() {
       technologies: project.technologies || '',
       categoryId: project.categoryId || '',
       link: project.link || '',
-      image: null,
-      removeImage: false,
     })
-    setImagePreview(null)
-    setKeepImageUrl(project.image || null)
+    setNewImages([])
+    setKeepImages(project.images && project.images.length ? [...project.images] : [])
     setTab('new')
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
@@ -156,6 +172,7 @@ function Admin() {
     try {
       await api.deleteProject(id)
       setToast({ kind: 'success', text: 'Проект удалён' })
+      if (editingId === id) resetForm()
       await refresh()
     } catch (err) {
       setToast({ kind: 'error', text: err.message })
@@ -207,12 +224,14 @@ function Admin() {
   const stats = useMemo(
     () => ({
       total: projects.length,
-      withImages: projects.filter((p) => p.image).length,
+      withImages: projects.filter((p) => (p.images?.length || 0) > 0).length,
       withoutCategory: projects.filter((p) => !p.categoryId).length,
       categories: categories.length,
     }),
     [projects, categories],
   )
+
+  const totalImages = keepImages.length + newImages.length
 
   if (!authed) {
     return (
@@ -342,57 +361,78 @@ function Admin() {
             <section className="panel">
               <h2>{editingId ? 'Редактировать проект' : 'Добавить проект'}</h2>
               <p className="panel-sub">
-                Заполните карточку проекта. Можно перетащить фото в зону загрузки.
+                Заполните карточку проекта. Можно перетащить несколько фото в зону загрузки.
               </p>
               <form className="form" onSubmit={submitProject}>
                 <div
-                  className="drop"
+                  className="drop drop-multi"
                   ref={dropRef}
                   onDragOver={onDragOver}
                   onDragLeave={onDragLeave}
                   onDrop={onDrop}
+                  onClick={(e) => {
+                    if (e.target === dropRef.current) fileInputRef.current?.click()
+                  }}
                 >
                   <input
+                    ref={fileInputRef}
                     type="file"
                     accept="image/*"
-                    onChange={(e) => setImage(e.target.files?.[0] || null)}
+                    multiple
+                    onChange={(e) => {
+                      addFiles(e.target.files)
+                      e.target.value = ''
+                    }}
+                    style={{ display: 'none' }}
                   />
-                  {imagePreview ? (
-                    <div className="drop-preview">
-                      <img src={imagePreview} alt="preview" />
-                      <div className="drop-meta">
-                        <strong>Новое фото готово к загрузке</strong>
-                        <span className="drop-hint">Кликните или перетащите другое</span>
-                      </div>
-                    </div>
-                  ) : keepImageUrl && !form.removeImage ? (
-                    <div className="drop-preview">
-                      <img src={assetUrl(keepImageUrl)} alt="current" />
-                      <div className="drop-meta">
-                        <strong>Текущее фото</strong>
-                        <span className="drop-hint">Кликните или перетащите, чтобы заменить</span>
-                      </div>
-                    </div>
-                  ) : (
+                  <div className="drop-head">
                     <div>
-                      <strong>Перетащите изображение сюда</strong>
-                      <div className="drop-hint">или кликните, чтобы выбрать (JPG / PNG / WebP)</div>
+                      <strong>Перетащите фото сюда</strong>
+                      <div className="drop-hint">
+                        Можно сразу несколько (JPG / PNG / WebP). Кликните, чтобы выбрать.
+                      </div>
+                    </div>
+                    <div className="drop-counter">
+                      {totalImages} {totalImages === 1 ? 'фото' : 'фото'}
+                    </div>
+                  </div>
+
+                  {(keepImages.length > 0 || newImages.length > 0) && (
+                    <div className="thumb-grid" onClick={(e) => e.stopPropagation()}>
+                      {keepImages.map((url, i) => (
+                        <div className="thumb" key={url}>
+                          <img src={assetUrl(url)} alt={`Фото ${i + 1}`} />
+                          {i === 0 && <span className="thumb-badge">Обложка</span>}
+                          <button
+                            type="button"
+                            className="thumb-remove"
+                            onClick={() => removeKeepImage(url)}
+                            aria-label="Удалить фото"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ))}
+                      {newImages.map((it, i) => (
+                        <div className="thumb new" key={it.id}>
+                          <img src={it.preview} alt="Новое фото" />
+                          {keepImages.length === 0 && i === 0 && (
+                            <span className="thumb-badge">Обложка</span>
+                          )}
+                          <span className="thumb-tag">новое</span>
+                          <button
+                            type="button"
+                            className="thumb-remove"
+                            onClick={() => removeNewImage(it.id)}
+                            aria-label="Убрать"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
-
-                {editingId && keepImageUrl && (
-                  <label className="checkbox">
-                    <input
-                      type="checkbox"
-                      checked={form.removeImage}
-                      onChange={(e) =>
-                        setForm({ ...form, removeImage: e.target.checked, image: null })
-                      }
-                    />
-                    Удалить текущее фото
-                  </label>
-                )}
 
                 <div className="form-grid">
                   <label className="span-2">
@@ -472,41 +512,48 @@ function Admin() {
               <h2>Все проекты</h2>
               <p className="panel-sub">Кликните «Редактировать», чтобы изменить карточку.</p>
               <div className="admin-projects">
-                {projects.map((p) => (
-                  <div className="admin-project" key={p.id}>
-                    {p.image ? (
-                      <img className="admin-project-thumb" src={assetUrl(p.image)} alt={p.title} />
-                    ) : (
-                      <div className="admin-project-thumb">{p.title.slice(0, 1).toUpperCase()}</div>
-                    )}
-                    <div className="admin-project-body">
-                      <h3>{p.title}</h3>
-                      <p>{p.description}</p>
-                      {p.technologies && (
-                        <div className="tech-row">
-                          {p.technologies
-                            .split(',')
-                            .map((t) => t.trim())
-                            .filter(Boolean)
-                            .slice(0, 4)
-                            .map((t) => (
-                              <span className="tech-pill" key={t}>
-                                {t}
-                              </span>
-                            ))}
+                {projects.map((p) => {
+                  const cover = p.images?.[0] || p.image
+                  const count = p.images?.length || (p.image ? 1 : 0)
+                  return (
+                    <div className="admin-project" key={p.id}>
+                      {cover ? (
+                        <div className="admin-project-thumb-wrap">
+                          <img className="admin-project-thumb" src={assetUrl(cover)} alt={p.title} />
+                          {count > 1 && <span className="admin-project-count">+{count - 1}</span>}
                         </div>
+                      ) : (
+                        <div className="admin-project-thumb">{p.title.slice(0, 1).toUpperCase()}</div>
                       )}
+                      <div className="admin-project-body">
+                        <h3>{p.title}</h3>
+                        <p>{p.description}</p>
+                        {p.technologies && (
+                          <div className="tech-row">
+                            {p.technologies
+                              .split(',')
+                              .map((t) => t.trim())
+                              .filter(Boolean)
+                              .slice(0, 4)
+                              .map((t) => (
+                                <span className="tech-pill" key={t}>
+                                  {t}
+                                </span>
+                              ))}
+                          </div>
+                        )}
+                      </div>
+                      <div className="admin-project-actions">
+                        <button className="btn btn-ghost" onClick={() => startEdit(p)}>
+                          Редактировать
+                        </button>
+                        <button className="link-btn danger" onClick={() => removeProject(p.id)}>
+                          Удалить
+                        </button>
+                      </div>
                     </div>
-                    <div className="admin-project-actions">
-                      <button className="btn btn-ghost" onClick={() => startEdit(p)}>
-                        Редактировать
-                      </button>
-                      <button className="link-btn danger" onClick={() => removeProject(p.id)}>
-                        Удалить
-                      </button>
-                    </div>
-                  </div>
-                ))}
+                  )
+                })}
                 {projects.length === 0 && (
                   <p className="muted">Пока нет проектов. Добавьте первый!</p>
                 )}

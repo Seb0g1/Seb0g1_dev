@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { api, assetUrl } from '../api.js'
+import { api } from '../api.js'
 import vkIcon from '../assets/vk.svg'
 import telegramIcon from '../assets/telegram.svg'
 import twitchIcon from '../assets/twitch.svg'
 import peoplePhoto from '../assets/people-cutout.png'
 import BrandLogo from '../components/BrandLogo.jsx'
+import ProjectGallery from '../components/ProjectGallery.jsx'
 
 const ALL = '__all__'
 
@@ -287,17 +288,19 @@ function Home() {
         )}
 
         <div className="project-grid">
-          {filtered.map((project) => (
+          {filtered.map((project) => {
+            const images = project.images?.length
+              ? project.images
+              : project.image
+                ? [project.image]
+                : []
+            return (
             <article className="project-card" key={project.id} data-reveal>
-              {project.image ? (
-                <div className="project-image">
-                  <img src={assetUrl(project.image)} alt={project.title} />
-                </div>
-              ) : (
-                <div className="project-image project-image-placeholder">
-                  <span>{project.title.slice(0, 1).toUpperCase()}</span>
-                </div>
-              )}
+              <ProjectGallery
+                images={images}
+                title={project.title}
+                placeholder={project.title.slice(0, 1).toUpperCase()}
+              />
               <div className="project-body">
                 {project.categoryId && (
                   <span className="badge">{categoryName(project.categoryId)}</span>
@@ -324,7 +327,8 @@ function Home() {
                 )}
               </div>
             </article>
-          ))}
+            )
+          })}
         </div>
       </section>
 
