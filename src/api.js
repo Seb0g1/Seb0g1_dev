@@ -6,10 +6,24 @@ export const getToken = () => localStorage.getItem(TOKEN_KEY) || ''
 export const setToken = (token) => localStorage.setItem(TOKEN_KEY, token)
 export const clearToken = () => localStorage.removeItem(TOKEN_KEY)
 
+/** Гарантирует корневой путь `/uploads/...`, чтобы с `/admin` не запрашивалось `/admin/uploads/...`. */
 export const assetUrl = (path) => {
-  if (!path) return ''
-  if (path.startsWith('http')) return path
-  return path
+  if (path == null || path === '') return ''
+  const s = String(path).trim()
+  if (!s) return ''
+  if (/^https?:\/\//i.test(s)) return s
+  let p = s.replace(/\\/g, '/')
+  if (!p.startsWith('/')) {
+    if (p.startsWith('uploads/')) p = `/${p}`
+    else if (!p.includes('/')) p = `/uploads/${p}`
+    else p = `/${p.replace(/^\/+/, '')}`
+  }
+  p = p.replace(/\/+/g, '/')
+  if (!p.startsWith('/uploads/')) {
+    const base = p.split('/').pop()
+    if (base && /\.(jpe?g|png|webp|gif|svg)$/i.test(base)) p = `/uploads/${base}`
+  }
+  return p
 }
 
 const request = async (path, { method = 'GET', body, auth = false, isForm = false } = {}) => {

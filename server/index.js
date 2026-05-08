@@ -147,6 +147,31 @@ app.delete('/api/categories/:id', requireAuth, (req, res) => {
 })
 
 const fileToImagePath = (file) => `/uploads/${file.filename}`
+
+/** Единый формат URL для сравнения и отдачи клиенту (избегаем рассинхрона и ложного удаления файлов). */
+function normalizeUploadUrl(input) {
+  if (input == null || input === '') return ''
+  let s = String(input).trim()
+  if (!s) return ''
+  if (/^https?:\/\//i.test(s)) {
+    try {
+      s = new URL(s).pathname || ''
+    } catch {
+      return ''
+    }
+  }
+  if (!s.startsWith('/')) {
+    if (s.startsWith('uploads/')) s = `/${s}`
+    else if (!s.includes('/')) s = `/uploads/${s}`
+    else s = `/${s.replace(/^\/+/, '')}`
+  }
+  s = s.replace(/\/+/g, '/')
+  const base = s.split('/').pop() || ''
+  if (s.startsWith('/uploads/') && base) return `/uploads/${base}`
+  if (base && /\.(jpe?g|png|webp|gif|svg)$/i.test(base)) return `/uploads/${base}`
+  return s
+}
+
 const removeUploadByUrl = (url) => {
   if (!url) return
   const filename = url.replace(/^\/uploads\//, '').split('/').pop()
@@ -162,8 +187,9 @@ const removeUploadByUrl = (url) => {
 }
 
 const normalizeProject = (project) => {
-  const images = Array.isArray(project.images) ? project.images.filter(Boolean) : []
+  let images = Array.isArray(project.images) ? project.images.filter(Boolean) : []
   if (images.length === 0 && project.image) images.push(project.image)
+  images = [...new Set(images.map(normalizeUploadUrl).filter(Boolean))]
   const cover = images[0] || null
   return { ...project, images, image: cover }
 }
@@ -196,7 +222,8 @@ app.post('/api/projects', requireAuth, projectImages, (req, res) => {
   }
   const db = readDB()
   const files = collectFiles(req)
-  const images = files.map(fileToImagePath)
+  const rawPaths = files.map(fileToImagePath)
+  const normalized = rawPaths.map(normalizeUploadUrl).filter(Boolean)
   const project = {
     id: nanoid(10),
     title: String(title).trim(),
@@ -204,8 +231,8 @@ app.post('/api/projects', requireAuth, projectImages, (req, res) => {
     technologies: String(technologies || '').trim(),
     categoryId: categoryId && db.categories.some((c) => c.id === categoryId) ? categoryId : null,
     link: (link || '').trim() || null,
-    images,
-    image: images[0] || null,
+    images: normalized,
+    image: normalized[0] || null,
     createdAt: new Date().toISOString(),
   }
   db.projects.unshift(project)
@@ -226,14 +253,25 @@ app.put('/api/projects/:id', requireAuth, projectImages, (req, res) => {
     link,
     removeImage,
     keepImages,
+    imageMerge,
   } = req.body || {}
 
-  let keep = current.images
+  let keep = [...current.images]
   if (keepImages !== undefined) {
     try {
       const parsed = typeof keepImages === 'string' ? JSON.parse(keepImages) : keepImages
       if (Array.isArray(parsed)) {
-        keep = parsed.filter((u) => current.images.includes(u))
+        const canonByNorm = new Map()
+        for (const u of current.images) {
+          const n = normalizeUploadUrl(u)
+          if (n && !canonByNorm.has(n)) canonByNorm.set(n, u)
+        }
+        keep = []
+        for (const raw of parsed) {
+          const n = normalizeUploadUrl(raw)
+          const canon = canonByNorm.get(n)
+          if (canon) keep.push(canon)
+        }
       }
     } catch {
       /* ignore */
@@ -244,9 +282,10 @@ app.put('/api/projects/:id', requireAuth, projectImages, (req, res) => {
   removed.forEach(removeUploadByUrl)
 
   const newFiles = collectFiles(req)
-  const added = newFiles.map(fileToImagePath)
+  const added = newFiles.map(fileToImagePath).map(normalizeUploadUrl).filter(Boolean)
 
-  let images = [...keep, ...added]
+  const newFirst = imageMerge === 'newFirst'
+  let images = newFirst ? [...added, ...keep] : [...keep, ...added]
   if (removeImage === 'true' || removeImage === true) {
     images.forEach(removeUploadByUrl)
     images = []
@@ -265,8 +304,8 @@ app.put('/api/projects/:id', requireAuth, projectImages, (req, res) => {
           : null
         : current.categoryId,
     link: link !== undefined ? (String(link).trim() || null) : current.link,
-    images,
-    image: images[0] || null,
+    images: images.map(normalizeUploadUrl).filter(Boolean),
+    image: normalizeUploadUrl(images[0]) || null,
   }
   db.projects[idx] = updated
   writeDB(db)

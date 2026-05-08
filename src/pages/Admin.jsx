@@ -3,6 +3,14 @@ import { Link } from 'react-router-dom'
 import { api, assetUrl, getToken, setToken, clearToken } from '../api.js'
 import BrandLogo from '../components/BrandLogo.jsx'
 
+/** Абсолютный URL для превью с сервера (иначе с /admin грузится /admin/uploads/... → 404). */
+const previewUploadSrc = (path) => {
+  const u = assetUrl(path)
+  if (!u) return ''
+  if (/^https?:\/\//i.test(u)) return u
+  return `${window.location.origin}${u}`
+}
+
 const emptyForm = {
   title: '',
   description: '',
@@ -36,6 +44,8 @@ function Admin() {
   const [editingId, setEditingId] = useState(null)
   const [newImages, setNewImages] = useState([])
   const [keepImages, setKeepImages] = useState([])
+  /** keepFirst: старые фото первыми (обложка из них). newFirst: новые загрузки первыми — обложка из новых. */
+  const [imageMerge, setImageMerge] = useState('keepFirst')
   const [newCategory, setNewCategory] = useState('')
   const [editingCategoryId, setEditingCategoryId] = useState(null)
   const [editingCategoryName, setEditingCategoryName] = useState('')
@@ -102,6 +112,20 @@ function Admin() {
     setKeepImages((prev) => prev.filter((u) => u !== url))
   }
 
+  const makeKeepCover = (url) => {
+    setKeepImages((prev) => [url, ...prev.filter((u) => u !== url)])
+    setImageMerge('keepFirst')
+  }
+
+  const makeNewCover = (id) => {
+    setNewImages((prev) => {
+      const item = prev.find((x) => x.id === id)
+      if (!item) return prev
+      return [item, ...prev.filter((x) => x.id !== id)]
+    })
+    setImageMerge('newFirst')
+  }
+
   const onDragOver = (e) => {
     e.preventDefault()
     dropRef.current?.classList.add('over')
@@ -118,6 +142,7 @@ function Admin() {
     setEditingId(null)
     setNewImages([])
     setKeepImages([])
+    setImageMerge('keepFirst')
   }
 
   const submitProject = async (e) => {
@@ -133,6 +158,7 @@ function Admin() {
       newImages.forEach((it) => data.append('images', it.file))
       if (editingId) {
         data.append('keepImages', JSON.stringify(keepImages))
+        data.append('imageMerge', imageMerge === 'newFirst' ? 'newFirst' : 'keepFirst')
       }
 
       if (editingId) {
@@ -162,7 +188,14 @@ function Admin() {
       link: project.link || '',
     })
     setNewImages([])
-    setKeepImages(project.images && project.images.length ? [...project.images] : [])
+    const urls =
+      project.images && project.images.length > 0
+        ? [...project.images]
+        : project.image
+          ? [project.image]
+          : []
+    setKeepImages(urls)
+    setImageMerge('keepFirst')
     setTab('new')
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
@@ -232,6 +265,13 @@ function Admin() {
   )
 
   const totalImages = keepImages.length + newImages.length
+
+  const coverKind = useMemo(() => {
+    if (imageMerge === 'newFirst' && newImages.length > 0) return 'new'
+    if (keepImages.length > 0) return 'keep'
+    if (newImages.length > 0) return 'new'
+    return null
+  }, [imageMerge, keepImages.length, newImages.length])
 
   if (!authed) {
     return (
@@ -361,7 +401,8 @@ function Admin() {
             <section className="panel">
               <h2>{editingId ? 'Редактировать проект' : 'Добавить проект'}</h2>
               <p className="panel-sub">
-                Заполните карточку проекта. Можно перетащить несколько фото в зону загрузки.
+                Заполните карточку проекта. Можно перетащить несколько фото в зону загрузки. Первое фото в
+                списке — обложка на сайте (кнопка «На обложку» ниже).
               </p>
               <form className="form" onSubmit={submitProject}>
                 <div
@@ -397,12 +438,25 @@ function Admin() {
                     </div>
                   </div>
 
+                  {editingId && keepImages.length > 0 && newImages.length > 0 && (
+                    <label className="checkbox merge-option">
+                      <input
+                        type="checkbox"
+                        checked={imageMerge === 'newFirst'}
+                        onChange={(e) => setImageMerge(e.target.checked ? 'newFirst' : 'keepFirst')}
+                      />
+                      Поставить новые фото в начало (обложка может быть из новых загрузок)
+                    </label>
+                  )}
+
                   {(keepImages.length > 0 || newImages.length > 0) && (
                     <div className="thumb-grid" onClick={(e) => e.stopPropagation()}>
                       {keepImages.map((url, i) => (
                         <div className="thumb" key={url}>
-                          <img src={assetUrl(url)} alt={`Фото ${i + 1}`} />
-                          {i === 0 && <span className="thumb-badge">Обложка</span>}
+                          <img src={previewUploadSrc(url)} alt={`Фото ${i + 1}`} />
+                          {coverKind === 'keep' && i === 0 && (
+                            <span className="thumb-badge">Обложка</span>
+                          )}
                           <button
                             type="button"
                             className="thumb-remove"
@@ -411,12 +465,19 @@ function Admin() {
                           >
                             ×
                           </button>
+                          <button
+                            type="button"
+                            className="thumb-cover-btn"
+                            onClick={() => makeKeepCover(url)}
+                          >
+                            На обложку
+                          </button>
                         </div>
                       ))}
                       {newImages.map((it, i) => (
                         <div className="thumb new" key={it.id}>
                           <img src={it.preview} alt="Новое фото" />
-                          {keepImages.length === 0 && i === 0 && (
+                          {coverKind === 'new' && i === 0 && (
                             <span className="thumb-badge">Обложка</span>
                           )}
                           <span className="thumb-tag">новое</span>
@@ -427,6 +488,13 @@ function Admin() {
                             aria-label="Убрать"
                           >
                             ×
+                          </button>
+                          <button
+                            type="button"
+                            className="thumb-cover-btn"
+                            onClick={() => makeNewCover(it.id)}
+                          >
+                            На обложку
                           </button>
                         </div>
                       ))}
@@ -519,7 +587,7 @@ function Admin() {
                     <div className="admin-project" key={p.id}>
                       {cover ? (
                         <div className="admin-project-thumb-wrap">
-                          <img className="admin-project-thumb" src={assetUrl(cover)} alt={p.title} />
+                          <img className="admin-project-thumb" src={previewUploadSrc(cover)} alt={p.title} />
                           {count > 1 && <span className="admin-project-count">+{count - 1}</span>}
                         </div>
                       ) : (
