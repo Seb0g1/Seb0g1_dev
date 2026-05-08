@@ -752,8 +752,106 @@ section {
 
 .project-body p {
   color: var(--text-dim);
+  line-height: 1.6;
+}
+
+/* ---------- Rich description ---------- */
+
+.rich-desc {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   flex: 1;
-  line-height: 1.5;
+}
+
+.rich-desc-body {
+  --rich-lines: 8;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  color: var(--text-dim);
+  font-size: 0.95rem;
+  line-height: 1.6;
+  max-height: calc(var(--rich-lines) * 1.6em);
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, #000 78%, rgba(0, 0, 0, 0) 100%);
+          mask-image: linear-gradient(to bottom, #000 78%, rgba(0, 0, 0, 0) 100%);
+  transition: max-height 0.25s ease;
+}
+
+.rich-desc.expanded .rich-desc-body {
+  max-height: 4000px;
+  -webkit-mask-image: none;
+          mask-image: none;
+}
+
+.rich-desc .rich-p {
+  margin: 0;
+  white-space: pre-line;
+  word-break: break-word;
+  hyphens: auto;
+}
+
+.rich-desc .rich-p strong {
+  color: var(--text);
+}
+
+.rich-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rich-list li {
+  position: relative;
+  padding-left: 20px;
+  color: var(--text-dim);
+  line-height: 1.55;
+}
+
+.rich-list li::before {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 0.55em;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent, #57d0ff), var(--accent-2, #a48bff));
+  box-shadow: 0 0 0 2px rgba(87, 208, 255, 0.12);
+}
+
+.rich-desc-toggle {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: 1px solid rgba(87, 208, 255, 0.28);
+  padding: 5px 12px;
+  border-radius: 999px;
+  color: var(--accent, #57d0ff);
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.rich-desc-toggle:hover {
+  background: rgba(87, 208, 255, 0.12);
+  border-color: rgba(87, 208, 255, 0.55);
+  color: #ffffff;
+}
+
+.rich-desc-toggle-arrow {
+  font-size: 0.9rem;
+  line-height: 1;
 }
 
 .tech-row {

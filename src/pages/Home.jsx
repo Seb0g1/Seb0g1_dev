@@ -6,6 +6,7 @@ import twitchIcon from '../assets/twitch.svg'
 import peoplePhoto from '../assets/people-cutout.png'
 import BrandLogo from '../components/BrandLogo.jsx'
 import ProjectGallery from '../components/ProjectGallery.jsx'
+import RichDescription from '../components/RichDescription.jsx'
 
 const ALL = '__all__'
 
@@ -320,7 +321,7 @@ function Home() {
                   <span className="badge">{categoryName(project.categoryId)}</span>
                 )}
                 <h3>{project.title}</h3>
-                <p>{project.description}</p>
+                <RichDescription text={project.description} collapseLines={8} />
                 {project.technologies && (
                   <div className="tech-row">
                     {project.technologies
